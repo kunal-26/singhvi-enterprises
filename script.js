@@ -13,6 +13,7 @@ const imageFile = document.getElementById("imageFile");
 const preview = document.getElementById("preview");
 
 /* INPUTS */
+
 const nameInput = document.getElementById("name");
 const priceInput = document.getElementById("price");
 const colorInput = document.getElementById("color");
@@ -47,17 +48,7 @@ function checkAdmin() {
 }
 checkAdmin();
 
-/* ---------- DATA ---------- */
-
-let products = JSON.parse(localStorage.getItem("products")) || [];
-let categories = JSON.parse(localStorage.getItem("categories")) || [];
-
-function save() {
-    localStorage.setItem("products", JSON.stringify(products));
-    localStorage.setItem("categories", JSON.stringify(categories));
-}
-
-/* IMAGE PREVIEW */
+/* ---------- IMAGE PREVIEW ---------- */
 
 imageFile.onchange = function() {
     const reader = new FileReader();
@@ -67,11 +58,33 @@ imageFile.onchange = function() {
     reader.readAsDataURL(imageFile.files[0]);
 };
 
-/* ADD PRODUCT */
+/* ---------- DATA FROM SUPABASE ---------- */
 
-let editIndex = null;
+let allProducts = [];
 
-function addProduct() {
+/* LOAD PRODUCTS */
+
+async function loadProducts() {
+
+    const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .order("id", { ascending: false });
+
+    if (error) {
+        console.error(error);
+        return;
+    }
+
+    allProducts = data;
+
+    buildCategories();
+    renderProducts();
+}
+
+/* ---------- ADD PRODUCT ---------- */
+
+async function addProduct() {
 
     const name = nameInput.value;
     const price = priceInput.value;
@@ -81,149 +94,146 @@ function addProduct() {
 
     const file = imageFile.files[0];
 
-    if (!file && editIndex === null) {
+    if (!file) {
         alert("Upload image");
         return;
     }
 
-    const reader = new FileReader();
+    const fileName = Date.now() + "_" + file.name;
 
-    reader.onload = e => {
+    /* UPLOAD IMAGE */
+    const { error: uploadError } = await supabase.storage
+        .from("products")
+        .upload(fileName, file);
 
-        const image = file ? e.target.result : products[editIndex].image;
+    if (uploadError) {
+        console.error(uploadError);
+        alert("Image upload failed");
+        return;
+    }
 
-        const data = { name, price, color, description, category, image };
+    /* GET PUBLIC URL */
+    const { data } = supabase.storage
+        .from("products")
+        .getPublicUrl(fileName);
 
-        if (editIndex !== null)
-            products[editIndex] = data;
-        else
-            products.push(data);
+    const imageUrl = data.publicUrl;
 
-        if (!categories.find(c => c.name === category)) {
-            categories.push({ name: category, image });
-        }
+    /* INSERT PRODUCT */
+    const { error } = await supabase
+        .from("products")
+        .insert([{
+            name,
+            price,
+            color,
+            description,
+            category,
+            image: imageUrl
+        }]);
 
-        save();
-        buildCategories();
-        renderProducts();
+    if (error) {
+        console.error(error);
+        alert("Database insert failed");
+        return;
+    }
 
-        nameInput.value = "";
-        priceInput.value = "";
-        colorInput.value = "";
-        descriptionInput.value = "";
-        categoryInput.value = "";
-        imageFile.value = "";
-        preview.innerHTML = "";
+    alert("Product Added ✅");
 
-        editIndex = null;
-    };
+    nameInput.value = "";
+    priceInput.value = "";
+    colorInput.value = "";
+    descriptionInput.value = "";
+    categoryInput.value = "";
+    imageFile.value = "";
+    preview.innerHTML = "";
 
-    if (file) reader.readAsDataURL(file);
-    else reader.onload({});
+    loadProducts();
 }
 
-/* DELETE PRODUCT */
+/* ---------- DELETE PRODUCT ---------- */
 
-function deleteProduct(i) {
+async function deleteProduct(id) {
+
     if (!confirm("Delete product?")) return;
-    products.splice(i, 1);
-    save();
-    renderProducts();
+
+    await supabase
+        .from("products")
+        .delete()
+        .eq("id", id);
+
+    loadProducts();
 }
 
-/* EDIT PRODUCT */
-
-function editProduct(i) {
-
-    const p = products[i];
-
-    nameInput.value = p.name;
-    priceInput.value = p.price;
-    colorInput.value = p.color;
-    descriptionInput.value = p.description;
-    categoryInput.value = p.category;
-
-    preview.innerHTML = `<img src="${p.image}" width="120">`;
-
-    editIndex = i;
-    window.scrollTo({ top: 0, behavior: "smooth" });
-}
-
-/* DELETE CATEGORYies */
-
-function deleteCategory(catName) {
-
-    if (!confirm("Delete category and products?")) return;
-
-    categories = categories.filter(c => c.name !== catName);
-    products = products.filter(p => p.category !== catName);
-
-    save();
-    buildCategories();
-    renderProducts();
-}
-
-/* CATEGORY UI */
+/* ---------- CATEGORY UI ---------- */
 
 function buildCategories() {
 
     categoryFilter.innerHTML = `<option value="all">All</option>`;
     categoryCards.innerHTML = "";
 
-    categories.forEach(c => {
+    const categories = {};
 
-                categoryFilter.innerHTML +=
-                    `<option value="${c.name}">${c.name}</option>`;
+    allProducts.forEach(p => {
+        if (!categories[p.category])
+            categories[p.category] = p.image;
+    });
 
-                categoryCards.innerHTML += `
-<div class="category-card">
-<img src="${c.image}" onclick="filterCategory('${c.name}')">
-<p>${c.name}</p>
-${isAdmin()?`<button onclick="deleteCategory('${c.name}')">Delete</button>`:""}
-</div>`;
-});
+    Object.keys(categories).forEach(cat => {
+
+        categoryFilter.innerHTML +=
+            `<option value="${cat}">${cat}</option>`;
+
+        categoryCards.innerHTML += `
+        <div class="category-card">
+            <img src="${categories[cat]}"
+                 onclick="filterCategory('${cat}')">
+            <p>${cat}</p>
+        </div>`;
+    });
 }
 
-function filterCategory(cat){
-categoryFilter.value=cat;
-renderProducts();
+function filterCategory(cat) {
+    categoryFilter.value = cat;
+    renderProducts();
 }
 
-/* RENDER PRODUCTS */
+/* ---------- RENDER PRODUCTS ---------- */
 
-function renderProducts(){
+function renderProducts() {
 
-const s=(search.value||"").toLowerCase();
-const cat=categoryFilter.value||"all";
+    const s = (search.value || "").toLowerCase();
+    const cat = categoryFilter.value || "all";
 
-productsDiv.innerHTML="";
+    productsDiv.innerHTML = "";
 
-products
-.filter(p=>
-p.name.toLowerCase().includes(s)&&
-(cat==="all"||p.category===cat)
-)
-.forEach((p,i)=>{
+    allProducts
+        .filter(p =>
+            p.name.toLowerCase().includes(s) &&
+            (cat === "all" || p.category === cat)
+        )
+        .forEach(p => {
 
-productsDiv.innerHTML+=`
-<div class="card">
-<img src="${p.image}">
-<h3>${p.name}</h3>
-<p class="price">₹${p.price}</p>
-<p>${p.description}</p>
-<small>${p.color}</small>
+                productsDiv.innerHTML += `
+            <div class="card">
 
-${isAdmin()?`
-<button onclick="editProduct(${i})">Edit</button>
-<button onclick="deleteProduct(${i})">Delete</button>
-`:""}
+                <img src="${p.image}">
+                <h3>${p.name}</h3>
+                <p class="price">₹${p.price}</p>
+                <p>${p.description}</p>
+                <small>${p.color}</small>
 
-</div>`;
-});
+                ${isAdmin() ? `
+                <button onclick="deleteProduct(${p.id})">
+                    Delete
+                </button>` : ""}
+
+            </div>`;
+        });
 }
 
-search.oninput=renderProducts;
-categoryFilter.onchange=renderProducts;
+search.oninput = renderProducts;
+categoryFilter.onchange = renderProducts;
 
-buildCategories();
-renderProducts();
+/* ---------- INIT ---------- */
+
+loadProducts();
