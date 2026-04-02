@@ -66,7 +66,7 @@ let allProducts = [];
 
 async function loadProducts() {
 
-    const { data, error } = await supabase
+    const { data, error } = await supabaseClient
         .from("products")
         .select("*")
         .order("id", { ascending: false });
@@ -102,7 +102,7 @@ async function addProduct() {
     const fileName = Date.now() + "_" + file.name;
 
     /* UPLOAD IMAGE */
-    const { error: uploadError } = await supabase.storage
+    const { error: uploadError } = await supabaseClient.storage
         .from("products")
         .upload(fileName, file);
 
@@ -113,14 +113,14 @@ async function addProduct() {
     }
 
     /* GET PUBLIC URL */
-    const { data } = supabase.storage
+    const { data } = supabaseClient.storage
         .from("products")
         .getPublicUrl(fileName);
 
     const imageUrl = data.publicUrl;
 
     /* INSERT PRODUCT */
-    const { error } = await supabase
+    const { error } = await supabaseClient
         .from("products")
         .insert([{
             name,
@@ -156,7 +156,7 @@ async function deleteProduct(id) {
 
     if (!confirm("Delete product?")) return;
 
-    await supabase
+    await supabaseClient
         .from("products")
         .delete()
         .eq("id", id);
