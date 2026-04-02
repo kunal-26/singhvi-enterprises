@@ -149,7 +149,7 @@ function editProduct(i) {
     window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
-/* DELETE CATEGORY */
+/* DELETE CATEGORYies */
 
 function deleteCategory(catName) {
 
